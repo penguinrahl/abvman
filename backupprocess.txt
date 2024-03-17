@@ -1,0 +1,77 @@
+
+#Lion backup process
+
+create a systm service
+
+cd /etc/systemd/system/ and create lionbackup.service
+
+# Add the following to the file and save
+
+[Unit]
+Description=Lion Backup Service
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c "/root/lionbackup > /var/log/lionbackup.log 2>&1"
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+
+#run the commands below  to enable the service
+
+sudo systemctl daemon-reload
+sudo systemctl start lionbackup
+sudo systemctl enable lionbackup
+
+
+
+tail -f /var/log/wghp1backup.log to check for backup process or errors
+
+journalctl -u lionbackup to check for backup process or errors
+
+#The backup scripts below
+
+#!/bin/bash
+
+LOCAL_SERVER="wghp1.whogohost.com"
+REMOTE_SERVER="storage3.whogohost.com"
+REMOTE_USERNAME="wghp1"
+REMOTE_SERVER_LOCATION="/backup2/wghp1/weekly2/$(date +%Y-%m-%d)/accounts"
+
+# Create directory on remote server if it doesn't exist
+ssh -A -p 22 "$REMOTE_USERNAME@$REMOTE_SERVER" "mkdir -p $REMOTE_SERVER_LOCATION"
+
+# Loop through cPanel users on the local server
+for user in $(ls -lh /var/cpanel/users | awk '{print $9}'); do
+
+    # Check if backup file exists in /home and /home2 directories
+    if [ -f "/home/cpmove-$user.tar.gz" ]; then
+        backup_file="/home/cpmove-$user.tar.gz"
+    elif [ -f "/home2/cpmove-$user.tar.gz" ]; then
+        backup_file="/home2/cpmove-$user.tar.gz"
+    else
+        echo "Creating backup for $user"
+        /scripts/pkgacct "$user"
+
+        # Check if backup file was successfully created
+        if [ -f "/home/cpmove-$user.tar.gz" ]; then
+            backup_file="/home/cpmove-$user.tar.gz"
+        elif [ -f "/home2/cpmove-$user.tar.gz" ]; then
+            backup_file="/home2/cpmove-$user.tar.gz"
+        else
+            echo "Failed to create backup for $user"
+            continue
+        fi
+    fi
+
+    # Transfer backup to remote server
+    rsync -avz -e "ssh -p 22" "$backup_file" "$REMOTE_USERNAME@$REMOTE_SERVER:$REMOTE_SERVER_LOCATION" || \
+    { echo "Failed to copy backup for $user to destination server"; exit 1; }
+
+    # Delete backup from local server
+    rm -f "$backup_file"
+done
+
+
+
