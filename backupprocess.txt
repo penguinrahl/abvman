@@ -8,12 +8,14 @@ cd /etc/systemd/system/ and create lionbackup.service
 # Add the following to the file and save
 
 [Unit]
-Description=Lion Backup Service
+Description=wghp1 Backup Service
+After=network.target
 
 [Service]
 Type=simple
-ExecStart=/bin/bash -c "/root/lionbackup > /var/log/lionbackup.log 2>&1"
+ExecStart=/root/wghp1backup
 Restart=always
+RestartSec=60
 
 [Install]
 WantedBy=multi-user.target
