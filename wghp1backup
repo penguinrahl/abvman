@@ -1,0 +1,56 @@
+#!/bin/bash
+
+# Define log file path
+LOG_FILE="/var/log/wghp1backup.log"
+
+# Function to log messages with timestamp
+log() {
+    echo "$(date +"%Y-%m-%d %H:%M:%S") $*" >> "$LOG_FILE"
+}
+
+# Clear existing log file
+> "$LOG_FILE"
+
+LOCAL_SERVER="wghp1.whogohost.com"
+REMOTE_SERVER="storage3.whogohost.com"
+REMOTE_USERNAME="wghp1"
+REMOTE_SERVER_LOCATION="/backup1/wghp1/weekly2/$(date +%Y-%m-%d)/accounts"
+
+# Log script start
+log "Backup script started"
+
+# Create directory on remote server if it doesn't exist
+ssh -A -p 22 "$REMOTE_USERNAME@$REMOTE_SERVER" "mkdir -p $REMOTE_SERVER_LOCATION" >> "$LOG_FILE" 2>&1
+
+# Loop through cPanel users on the local server
+for user in $(ls -lh /var/cpanel/users | awk '{print $9}'); do
+
+    # Log backup creation for user
+    log "Creating backup for $user"
+
+    # Check if backup file exists in /home and /home2 directories
+    if [ -f "/home/cpmove-$user.tar.gz" ]; then
+        backup_file="/home/cpmove-$user.tar.gz"
+    elif [ -f "/home2/cpmove-$user.tar.gz" ]; then
+        backup_file="/home2/cpmove-$user.tar.gz"
+    else
+        # Log failure to create backup
+        log "Failed to create backup for $user"
+        continue
+    fi
+
+    # Transfer backup to remote server
+    rsync -avz -e "ssh -p 22 -A" "$backup_file" "$REMOTE_USERNAME@$REMOTE_SERVER:$REMOTE_SERVER_LOCATION" >> "$LOG_FILE" 2>&1 || \
+    { 
+        # Log failure to copy backup
+        log "Failed to copy backup for $user to destination server"
+        exit 1
+    }
+
+    # Log successful backup transfer and delete
+    log "Successfully copied backup for $user to destination server"
+    rm -f "$backup_file" >> "$LOG_FILE" 2>&1
+done
+
+# Log script end
+log "Backup script ended"
