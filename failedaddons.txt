@@ -1,0 +1,69 @@
+#!/bin/bash
+
+REMOTE_SERVER="storage2.whogohost.com"
+REMOTE_USERNAME="wghp8"
+REMOTE_BACKUP_DIR="/backup/wghp8/weekly2/2023-12-29/accounts/"
+LOCAL_BACKUP_DIR="/home/techrestore/dectechrestore"
+USER_LIST_FILE="/home/addonrestore"  # Updated path to your user list file
+
+# Create the local directory if it doesn't exist
+mkdir -p "$LOCAL_BACKUP_DIR"
+
+# Check if the user list file exists
+if [ ! -e "$USER_LIST_FILE" ]; then
+    echo "User list file not found: $USER_LIST_FILE"
+    exit 1
+fi
+
+# Read usernames from the file
+USERNAMES=$(cat "$USER_LIST_FILE")
+
+# Initialize counter
+RESTORED_COUNT=0
+
+# Loop through users and perform actions
+for USERNAME in $USERNAMES; do
+    BACKUP_FILE="$REMOTE_BACKUP_DIR/cpmove-$USERNAME.tar.gz"
+
+    echo "Checking for backup for the user \"$USERNAME\"."
+
+    # Check if the account backup exists on the remote server
+    if ssh "$REMOTE_USERNAME@$REMOTE_SERVER" "[ -e \"$BACKUP_FILE\" ]"; then
+        echo "Backup found for user \"$USERNAME\"."
+
+        # Copy the backup from the remote server to the local directory
+        scp "$REMOTE_USERNAME@$REMOTE_SERVER:$BACKUP_FILE" "$LOCAL_BACKUP_DIR/$(basename "$BACKUP_FILE")"
+
+        # Check if the account archive exists locally
+        if [ -e "$LOCAL_BACKUP_DIR/$(basename $BACKUP_FILE)" ]; then
+            # Remove the existing account on the server
+            yes | /scripts/removeacct "$USERNAME"  # Automatically answers "yes"
+
+            # Restore the account using cPanel restorepkg with --force option and specified backup path
+            /scripts/restorepkg --force "$USERNAME" "$LOCAL_BACKUP_DIR/$(basename "$BACKUP_FILE")"
+            if [ $? -eq 0 ]; then
+                echo "Successfully restored account $USERNAME."
+
+                # Delete the local backup file after successful restoration
+                rm -f "$LOCAL_BACKUP_DIR/$(basename $BACKUP_FILE)"
+
+                echo "Deleted local backup file for user $USERNAME."
+
+                # Increment the counter
+                ((RESTORED_COUNT++))
+                
+                echo "Accounts Restored So Far: $RESTORED_COUNT"
+            else
+                echo "Failed to restore account $USERNAME."
+            fi
+        else
+            echo "Local backup file not found for the user \"$USERNAME\"."
+        fi
+    else
+        echo "Backup file not found for the user \"$USERNAME\" on the remote server."
+    fi
+done
+
+# Exit the script once all users have been processed
+echo "All users have been processed. Total accounts restored: $RESTORED_COUNT."
+exit 0
