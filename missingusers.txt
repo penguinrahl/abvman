@@ -1,0 +1,84 @@
+#!/bin/bash
+
+# Source and destination servers
+source_server="wghp8.whogohost.com"
+destination_server="wghp11.whogohost.com"
+remote_user="root"
+
+# File containing usernames
+usernames_file="missing_users"
+
+# Read usernames from the file
+while IFS= read -r username; do
+    # Source and destination directories on the local server
+    source_directory="/home/$username"
+    alternative_source_directory="/home2/$username"
+
+    # Check if source directory exists on the source server
+    if [ -d "$source_directory" ]; then
+        echo "Source directory exists on the local server"
+    else
+        source_directory=$alternative_source_directory
+    fi
+
+    # Get the parent directory of the user directory
+    parent_directory=$(dirname "$source_directory")
+
+    # Change to the parent directory and create a backup
+    cd "$parent_directory" || exit
+    tar -czvf "${username}_backup.tar.gz" "$username"
+
+    # Copy the backup to the destination server
+    scp -P 22 "${username}_backup.tar.gz" $remote_user@$destination_server:/home/$username/public_html || \
+    scp -P 22 "${username}_backup.tar.gz" $remote_user@$destination_server:/home2/$username/public_html || { echo "Failed to copy backup for $username to destination server"; exit 1; }
+
+    # SSH into the destination server
+    ssh -A -p 22 $remote_user@$destination_server <<ENDSSH
+        # Move to the correct directory
+        cd /home/$username/public_html 2>/dev/null || cd /home2/$username/public_html || { echo "Destination directory does not exist, skipping."; exit 1; }
+
+        # Extract the backup
+        tar -xzvf ${username}_backup.tar.gz
+
+        # Set permissions
+        chmod 755 $username
+        chown -R $username:$username $username
+
+        # Move files to /home/username/public_html
+        mv $username/public_html/* ./
+        rm -r $username/public_html
+
+        # Move to the correct destination directory
+        cd ..
+
+        # Overwrite mail and etc folders using rsync
+        rsync -av --delete $username/mail/ /home/$username/mail/ || rsync -av --delete $username/mail/ /home2/$username/mail/
+        rsync -av --delete $username/etc/ /home/$username/etc/ || rsync -av --delete $username/etc/ /home2/$username/etc/
+
+        # Clean up
+        rm -r $username
+        rm ${username}_backup.tar.gz
+        exit 0
+ENDSSH
+
+    # Increment user count
+    ((user_count++))
+
+    # Run /scripts/pkgacct username on the source server and copy to wghp8
+    ssh -A -p 22 $remote_user@$destination_server "/scripts/pkgacct $username && \
+        (scp /home2/cpmove-${username}.tar.gz $remote_user@$source_server:/home/techrestore/dectechrestore/ || \
+         scp /home/cpmove-${username}.tar.gz $remote_user@$source_server:/home/techrestore/dectechrestore/)"
+
+    # Remove the account on wghp11.whogohost.com
+    ssh -A -p 22 $remote_user@$destination_server "/scripts/removeacct $username"
+
+    # Login to wghp8.whogohost.com and run /scripts/restorepkg
+    ssh -A -p 22 $remote_user@$source_server "/scripts/restorepkg --force $username /home/techrestore/dectechrestore/cpmove-${username}.tar.gz"
+
+    # Echo statement indicating account restoration completion
+    echo "Account $username has been restored."
+
+done < "$usernames_file"
+
+# Display user count
+echo "Script completed for $user_count users."
