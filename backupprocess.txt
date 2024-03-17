@@ -91,5 +91,7 @@ done
 # Log script end
 log "Backup script ended"
 
+# Exit script with success status
+exit 0
 
 
