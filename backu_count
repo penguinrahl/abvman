@@ -1,0 +1,19 @@
+#!/bin/bash
+
+if [ $# -ne 1 ]; then
+    echo "Syntax error. Use $(basename $0) <backup_location> instead."
+    exit 1
+fi
+
+backup_location=$1
+dates=$(find "$backup_location" -maxdepth 1 -type d -name '20*')
+
+for date_dir in $dates; do
+    echo "Checking weekly"
+    accounts_dirs=$(find "$date_dir" -mindepth 1 -maxdepth 1 -type d -name 'accounts')
+    for account_dir in $accounts_dirs; do
+        count=$(ls -l "$account_dir" | grep -v '^total' | wc -l)
+        echo "$account_dir $count"
+    done
+    echo
+done
