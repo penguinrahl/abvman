@@ -6,10 +6,11 @@ get_month_abbreviation() {
   echo "${month_abbr}techrestore"
 }
 
-# Function to check for backups and copy the latest one to the user server
+# Function to check for backups and copy the selected one to the user server
 check_backup() {
   local username=$1
   local month_abbr=$(get_month_abbreviation)
+  local backups_found=false  # Variable to track if any backups were found
 
   # Define servers, their associated partitions, and their respective user servers
   declare -A server_partitions
@@ -43,24 +44,40 @@ check_backup() {
       # Capture the output of the find command
       backup_files=$(ssh -p 22 -A root@"$server" "find $partition -type f -iname '*$username*' 2>/dev/null")
       
-      # Print the found backup files and copy the latest backup, if any
+      # Print the found backup files and copy the selected backup, if any
       if [ -n "$backup_files" ]; then
+        backups_found=true  # Backups found
         echo "Backups found for $username on $server:"
-        echo "$backup_files"
-        latest_backup=$(echo "$backup_files" | sort -r | head -n 1)  # Get the latest backup file
-        # Extract the user server key from the file path
-        user_server_key=$(echo "$latest_backup" | awk -F/ '{print $3}')
-        # Get the user server hostname
-        user_server=${user_servers[$user_server_key]}
-        if [ -n "$user_server" ]; then
-          echo "Copying $latest_backup to /home/techrestore/$month_abbr on $user_server..."
-          scp -P 22 root@"$server":"$latest_backup" root@"$user_server":"/home/techrestore/$month_abbr/"
+        IFS=$'\n' read -r -d '' -a backup_array <<< "$backup_files"
+        for i in "${!backup_array[@]}"; do
+          echo "$((i+1)). ${backup_array[$i]}"
+        done
+        
+        # Prompt the user to select a backup file by number
+        read -p "Please enter the number of the backup you would like to restore: " selected_number
+        selected_backup=${backup_array[$((selected_number-1))]}
+        
+        if [ -n "$selected_backup" ]; then
+          # Extract the user server key from the file path
+          user_server_key=$(echo "$selected_backup" | awk -F/ '{print $3}')
+          # Get the user server hostname
+          user_server=${user_servers[$user_server_key]}
+          if [ -n "$user_server" ]; then
+            echo "Copying $selected_backup to /home/techrestore/$month_abbr on $user_server..."
+            scp -P 22 root@"$server":"$selected_backup" root@"$user_server":"/home/techrestore/$month_abbr/"
+          else
+            echo "User server not found for key: $user_server_key"
+          fi
         else
-          echo "User server not found for key: $user_server_key"
+          echo "Invalid selection."
         fi
       fi
     done
   done
+
+  if [ "$backups_found" = false ]; then
+    echo "No backups found for $username."
+  fi
 }
 
 # Ensure a username is provided
