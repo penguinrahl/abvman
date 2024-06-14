@@ -1,0 +1,95 @@
+#!/bin/bash
+
+# Function to get the month abbreviation
+get_month_abbreviation() {
+  local month_abbr=$(date +%b | tr '[:upper:]' '[:lower:]')
+  echo "${month_abbr}techrestore"
+}
+
+# Function to check for backups and prompt user to select one for copying
+check_backup() {
+  local username=$1
+  local month_abbr=$(get_month_abbreviation)
+
+  # Define servers, their associated partitions, and their respective user servers
+  declare -A server_partitions
+  declare -A user_servers
+  server_partitions=(
+    ["storage.whogohost.com"]="/backup/wghp7 /backup/wghp11 /backup2/wghp9 /backup3/wghp4 /backup3/wghp5"
+    ["storage2.whogohost.com"]="/backup/wghp2 /backup/wghp8 /backup2/wghp6 /backup2/wghp10"
+    ["storage3.whogohost.com"]="/backup1/wghp1 /backup1/lion /backup1/wghp3 /backup1/shark"
+    ["eel.whogohost.com"]="/backup/weekly"  # New server and its partition
+  )
+  user_servers=(
+    ["wghp7"]='wghp7.whogohost.com'
+    ["wghp11"]='wghp11.whogohost.com'
+    ["wghp9"]='wghp9.whogohost.com'
+    ["wghp4"]='wghp4.whogohost.com'
+    ["wghp5"]='wghp5.whogohost.com'
+    ["wghp2"]='wghp2.whogohost.com'
+    ["wghp8"]='wghp8.whogohost.com'
+    ["wghp6"]='wghp6.whogohost.com'
+    ["wghp10"]='wghp10.whogohost.com'
+    ["wghp1"]='wghp1.whogohost.com'
+    ["lion"]='lion.whogohost.com'
+    ["wghp3"]='wghp3.whogohost.com'
+    ["shark"]='shark.whogohost.com'
+    ["eel"]='eel.whogohost.com'  # New user server
+  )
+
+  # Array to store backup files
+  local backups=()
+
+  # Iterate over each server and its associated partitions
+  for server in "${!server_partitions[@]}"; do
+    for partition in ${server_partitions[$server]}; do
+      # Capture the output of the find command
+      backup_files=$(ssh -p 22 -A root@"$server" "find $partition -type f -iname '*$username*' 2>/dev/null")
+      
+      # Add found backups to the backups array
+      backups+=($backup_files)
+    done
+  done
+
+  # Display the found backups with their date and file path
+  if [ "${#backups[@]}" -gt 0 ]; then
+    echo "Backups found for $username:"
+    for ((i = 0; i < ${#backups[@]}; i++)); do
+      backup="${backups[$i]}"
+      if [ -n "$backup" ]; then
+        backup_date=$(date -r "$backup" +"%Y-%m-%d %H:%M:%S")
+        echo "$(($i + 1)). Date: $backup_date | Path: $backup"
+      fi
+    done
+
+    # Prompt the user to select a backup
+    read -p "Enter the number of the backup to copy to $month_abbr (1-${#backups[@]}): " selected_backup_num
+    if [[ $selected_backup_num =~ ^[1-9][0-9]*$ ]] && ((selected_backup_num <= ${#backups[@]})); then
+      selected_backup=${backups[$(($selected_backup_num - 1))]}
+      echo "Copying $selected_backup to /home/techrestore/$month_abbr..."
+
+      # Extract the user server key from the file path
+      user_server_key=$(echo "$selected_backup" | awk -F/ '{print $3}')
+      # Get the user server hostname
+      user_server=${user_servers[$user_server_key]}
+      if [ -n "$user_server" ]; then
+        scp -P 22 root@"$server":"$selected_backup" root@"$user_server":"/home/techrestore/$month_abbr/"
+      else
+        echo "User server not found for key: $user_server_key"
+      fi
+    else
+      echo "Invalid backup number selected."
+    fi
+  else
+    echo "No backups found for $username."
+  fi
+}
+
+# Ensure a username is provided
+if [ -z "$1" ]; then
+  echo "Usage: $0 username"
+  exit 1
+fi
+
+# Call the check_backup function with the provided username
+check_backup "$1"
